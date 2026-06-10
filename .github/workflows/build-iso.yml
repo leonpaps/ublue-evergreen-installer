@@ -7,6 +7,9 @@ on:
 jobs:
   build-installer:
     runs-on: ubuntu-latest
+    # FORCE THE RUNNER INSTANCE INTO A STABLE PYTHON CONTAINER TANK
+    container:
+      image: ghcr.io/ublue-os/isogenerator:39
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -17,7 +20,7 @@ jobs:
           mkdir -p squashfs-root
           cp -r default-distros squashfs-root/
 
-      # Generates your custom minimal ISO utilizing a strictly locked, deterministic base image layer tag
+      # Generates your custom minimal ISO utilizing a strictly locked baseline engine
       - name: Generate Minimal Bootc Media
         uses: jasonn3/build-container-installer@main
         id: build
@@ -27,7 +30,6 @@ jobs:
           variant: "CoreOS" 
           image_name: "fedora-bootc"
           image_repo: "quay.io/fedora/fedora-bootc"
-          # Frozen strictly to the stable Fedora 40 core point-release line to block out rolling changes
           image_tag: "40"
           iso_name: "universal-bootc-evergreen.iso"
 
