@@ -7,9 +7,6 @@ on:
 jobs:
   build-installer:
     runs-on: ubuntu-latest
-    # FORCE THE RUNNER INSTANCE INTO A STABLE PYTHON CONTAINER TANK
-    container:
-      image: ghcr.io/ublue-os/isogenerator:39
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -20,7 +17,7 @@ jobs:
           mkdir -p squashfs-root
           cp -r default-distros squashfs-root/
 
-      # Generates your custom minimal ISO utilizing a strictly locked baseline engine
+      # Generates your custom minimal ISO utilizing a stable baseline tag configuration
       - name: Generate Minimal Bootc Media
         uses: jasonn3/build-container-installer@main
         id: build
@@ -33,6 +30,7 @@ jobs:
           image_tag: "40"
           iso_name: "universal-bootc-evergreen.iso"
 
+      # Save the final output binary payload as a downloadable build asset
       - name: Publish Artifact
         uses: actions/upload-artifact@v4
         with:
