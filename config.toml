@@ -1,7 +1,9 @@
 # Universal Blue Deployment Specification Profile
 [customizations.installer]
-# This injects our custom dynamic picker shell variables straight into the ISO's active profile runtime environment
-kickstart = """
+
+# The installer schema requires an explicit table structure block rather than a raw text string assignment
+[customizations.installer.kickstart]
+contents = """
 text
 version=DEVEL
 keyboard --vckeymap=us --xlayouts='us'
