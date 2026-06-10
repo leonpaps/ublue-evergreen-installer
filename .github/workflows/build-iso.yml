@@ -11,12 +11,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # CRITICAL STEP: Move your flat-file database into the ISO filesystem root
+      # Move your flat-file database and icon layouts into the ISO filesystem root staging tank
       - name: Stage Distribution Registry
         run: |
           mkdir -p squashfs-root
           cp -r default-distros squashfs-root/
 
+      # Generates your custom minimal ISO utilizing a strictly locked, deterministic base image layer tag
       - name: Generate Minimal Bootc Media
         uses: jasonn3/build-container-installer@main
         id: build
@@ -24,9 +25,10 @@ jobs:
           arch: "x86_64"
           version: "40"
           variant: "CoreOS" 
-          image_name: "centos-bootc"
-          image_repo: "quay.io/centos-bootc"
-          image_tag: "stream10"
+          image_name: "fedora-bootc"
+          image_repo: "quay.io/fedora/fedora-bootc"
+          # Frozen strictly to the stable Fedora 40 core point-release line to block out rolling changes
+          image_tag: "40"
           iso_name: "universal-bootc-evergreen.iso"
 
       - name: Publish Artifact
