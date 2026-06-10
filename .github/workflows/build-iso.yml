@@ -11,34 +11,135 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. Structure the local data trees into the expected filesystem staging root
-      # This copies your flat-file database and scripts into the build layer path
-      name: Stage ISO Filesystem Root Overrides
-      run: |
-        mkdir -p squashfs-root
-        cp -r default-distros squashfs-root/
+      # We inject your dynamic GUI script and data paths straight into a temporary build context
+      - name: Formulate Custom Builder Context
+        run: |
+          mkdir -p context
+          cp -r default-distros context/
+          
+          # Write the script directly into the context payload tank
+          cat << 'EOF' > context/ask-url.sh
+          #!/usr/bin/env bash
+          export DISPLAY=:0
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
 
-      # 2. Compile the installer image manually via a locked, stable compiler binary
-      # This uses a production-tested version from early 2024 to step completely around Python 3.14 bugs
-      name: Compile Installer ISO via Locked Bootc Image Builder
-      run: |
-        mkdir -p build-output
-        
-        sudo podman run \
-          --rm \
-          --privileged \
-          --security-opt label=disable \
-          -v ./custom.ks:/custom.ks:ro \
-          -v ./squashfs-root:/squashfs-root:ro \
-          -v ./build-output:/output \
-          quay.io/centos-bootc/bootc-image-builder:0.1.11 \
-          --type anaconda-iso \
-          --kickstart /custom.ks \
-          quay.io/fedora/fedora-bootc:40
+          DISTRO_DIR="/default-distros"
+          YAD_ARGS=()
 
-      # 3. Save the successfully compiled deployment artifact
-      name: Publish Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: universal-bootc-utility
-        path: build-output/anaconda-iso/boot.iso
+          if [ ! -d "$DISTRO_DIR" ]; then
+              yad --error --title="Fatal Error" --text="Distribution matrix registry missing."
+              exit 1
+          fi
+
+          # 1. Loop through your local folders to build the interface table
+          FIRST_ROW=true
+          while IFS= read -r d; do
+              INI_FILE="$d/variants.ini"
+              [ ! -f "$INI_FILE" ] && continue
+              LOGO="preferences-desktop-theme"
+              if [ -f "$d/logo.png" ]; then LOGO="$d/logo.png"; fi
+
+              current_section=""
+              current_name=""
+              current_url=""
+              current_desc=""
+
+              while IFS= read -r line || [ -n "$line" ]; do
+                  if [[ "$line" =~ ^\[(.*)\]$ ]]; then
+                      if [ -n "$current_name" ] && [ -n "$current_url" ]; then
+                          YAD_ARGS+=("$FIRST_ROW" "$LOGO" "$current_name" "$current_url" "$current_desc")
+                          FIRST_ROW=false
+                      fi
+                      current_section="${BASH_REMATCH[1]}"
+                      current_name=""
+                      current_url=""
+                      current_desc="No description provided."
+                  elif [[ "$line" =~ ^name=(.*)$ ]]; then
+                      current_name="${BASH_REMATCH[1]}"
+                  elif [[ "$line" =~ ^url=(.*)$ ]]; then
+                      current_url="${BASH_REMATCH[1]}"
+                  elif [[ "$line" =~ ^description=(.*)$ ]]; then
+                      current_desc="${BASH_REMATCH[1]}"
+                  fi
+              done < "$INI_FILE"
+
+              if [ -n "$current_name" ] && [ -n "$current_url" ]; then
+                  YAD_ARGS+=("$FIRST_ROW" "$LOGO" "$current_name" "$current_url" "$current_desc")
+                  FIRST_ROW=false
+              fi
+          done < <(find "$DISTRO_DIR" -mindepth 1 -maxdepth 1 -type d)
+
+          # 2. Render Selection Window Interaction Matrix
+          while true; do
+              CHOSEN_ROW=$(yad --list \
+                --title="Universal Blue Evergreen Deployer" \
+                --width=750 --height=500 --center --fixed \
+                --text="Select your target hardware container deployment layout:" \
+                --radiolist \
+                --column="Select" --column="Icon:IMG" --column="Variant" --column="OCI Target Endpoint" --column="Description:hide" \
+                "${YAD_ARGS[@]}" \
+                --dclick-action="none" \
+                --button="Deploy Profile:0" --button="Custom Repo String:2" --button="Cancel:1")
+
+              ACTION_STATUS=$?
+              if [ "$ACTION_STATUS" -eq 1 ] || [ -z "$CHOSEN_ROW" ]; then exit 1; fi
+
+              if [ "$ACTION_STATUS" -eq 2 ]; then
+                  FINAL_URL=$(yad --entry --title="Custom OCI Deployment" --text="Enter or paste any bootc address:" --entry-text="docker://ghcr.io/")
+              else
+                  FINAL_URL=$(echo "$CHOSEN_ROW" | awk -F '|' '{print $4}')
+              fi
+
+              FINAL_URL=$(echo "$FINAL_URL" | sed -E 's|^(docker://)?|docker://|')
+              RAW_REGISTRY_PATH=${FINAL_URL#docker://}
+
+              yad --title="Validating Target" --text="Verifying connection to remote image:\n$RAW_REGISTRY_PATH" --progress --pulsate --auto-close &
+              SPINNER_PID=$!
+              podman manifest inspect "docker://$RAW_REGISTRY_PATH" > /dev/null 2>&1
+              VALIDATION_RESULT=$?
+              kill $SPINNER_PID 2>/dev/null
+
+              if [ "$VALIDATION_RESULT" -eq 0 ]; then
+                  echo "bootc --image=${FINAL_URL}" > /tmp/bootc-target.ks
+                  break
+              else
+                  yad --error --title="Deployment Error" --width=450 --text="<b>Could not resolve target image:</b>\n<i>$RAW_REGISTRY_PATH</i>\n\nPlease check your network connection and spelling."
+              fi
+          done
+          EOF
+          chmod +x context/ask-url.sh
+
+      # 3. Compile a custom runtime image layer containing your script payload tools
+      # This completely cleanly encapsulates your tools so Lorax doesn't have to touch them
+      - name: Build Customized Bootstrap Payload Layer
+        run: |
+          cat << 'EOF' > Containerfile
+          FROM quay.io/fedora/fedora-bootc:40
+          RUN dnf install -y yad podman && dnf clean all
+          COPY context/default-distros /default-distros
+          COPY context/ask-url.sh /usr/bin/ask-url.sh
+          EOF
+          sudo podman build -t localhost/custom-bootstrap-payload:latest .
+
+      # 4. Invoke the immutable bootc-image-builder engine directly via native volume mount strings
+      - name: Generate Minimal Bootc Media
+        run: |
+          mkdir -p build-output
+          sudo podman run \
+            --rm \
+            --privileged \
+            --security-opt label=disable \
+            -v ./config.toml:/config.toml:ro \
+            -v ./build-output:/output \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type bootc-installer \
+            --config /config.toml \
+            localhost/custom-bootstrap-payload:latest
+
+      # 5. Export compiled installation ISO out as a safe asset artifact link
+      - name: Publish Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-bootc-utility
+          path: build-output/bootc-installer/boot.iso

@@ -1,3 +1,7 @@
+# Universal Blue Deployment Specification Profile
+[customizations.installer]
+# This injects our custom dynamic picker shell variables straight into the ISO's active profile runtime environment
+kickstart = """
 text
 version=DEVEL
 keyboard --vckeymap=us --xlayouts='us'
@@ -10,8 +14,10 @@ autopart --type=plain
 network --bootproto=dhcp --device=link --activate
 
 %pre --interpreter=/usr/bin/bash
+# Re-route straight to our runtime profile picker engine
 /usr/bin/ask-url.sh
 %end
 
 %include /tmp/bootc-target.ks
 reboot
+"""
