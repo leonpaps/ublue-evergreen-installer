@@ -1,0 +1,36 @@
+name: Build Universal Bootc Evergreen ISO
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # CRITICAL STEP: Move your flat-file database into the ISO filesystem root
+      - name: Stage Distribution Registry
+        run: |
+          mkdir -p squashfs-root
+          cp -r default-distros squashfs-root/
+
+      - name: Generate Minimal Bootc Media
+        uses: jasonn3/build-container-installer@main
+        id: build
+        with:
+          arch: "x86_64"
+          version: "40"
+          variant: "CoreOS" 
+          image_name: "centos-bootc"
+          image_repo: "quay.io/centos-bootc"
+          image_tag: "stream10"
+          iso_name: "universal-bootc-evergreen.iso"
+
+      - name: Publish Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-bootc-utility
+          path: ${{ steps.build.outputs.iso_path }}/${{ steps.build.outputs.iso_name }}
